@@ -20,8 +20,8 @@ documents = [
 doc_embeddings = model.encode(documents)
 
 # --- 2. Gemini API setup ---
-GEMINI_API_URL = "https://gemini.googleapis.com/v1/your-model-id:generateMessage"
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.3B:generateMessage"
+GEMINI_API_KEY = "AIzaSyDcs6yyUsnOrNpat3W4N3ycKUjEiOkKO0U"
 
 def generate_gemini_response(user_question, retrieved_docs):
     # Construct prompt with retrieved docs
