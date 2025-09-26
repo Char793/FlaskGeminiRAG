@@ -1,58 +1,73 @@
 import os
+import csv
 import traceback
-from flask import Flask, request, jsonify
-from google import genai
-from google.genai.types import HttpOptions
-from flask_cors import CORS
+import datetime
+import threading
 import numpy as np
 
-# Optional: sentence-transformers embedding (may download weights)
-USE_KEYWORD_RETRIEVAL = os.environ.get("USE_KEYWORD_RETRIEVAL", "0") == "1"
-try:
-    if not USE_KEYWORD_RETRIEVAL:
-        from sentence_transformers import SentenceTransformer
-        from sklearn.metrics.pairwise import cosine_similarity
-except Exception as e:
-    print("Could not import sentence-transformers or sklearn. Falling back to keyword retrieval.")
-    print(e)
-    USE_KEYWORD_RETRIEVAL = True
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
+from google import genai
+from google.genai.types import HttpOptions
+from google.cloud import storage
+
+# --- Flask App ---
 app = Flask(__name__)
-CORS(app, origins="*")  # in production restrict origins to your GitHub Pages URL
+CORS(app, origins="*")  # in production, restrict to your frontend domain
 
-# Required env var
+# --- Env Vars ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY environment variable not set. See README.")
+    raise RuntimeError("GEMINI_API_KEY environment variable not set.")
 
-# Model selection (default to the working one you found)
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+LOG_BUCKET = os.environ.get("LOG_BUCKET", "my-chat-logs")
 
-# Initialize client (force v1 API)
+USE_KEYWORD_RETRIEVAL = os.environ.get("USE_KEYWORD_RETRIEVAL", "0") == "1"
+
+# --- Gemini Client ---
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
 
-# Small example knowledge base (replace/expand in production)
-documents = [
-    "Product X warranty lasts 2 years.",
-    "Product Y is waterproof and can be used outdoors.",
-    "Support is available 24/7 via email support@example.com",
-]
+# --- Load Knowledge Base (CSV) ---
+documents = []
+with open("knowledge_base.csv", "r", encoding="utf-8") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        if row["content"].strip():
+            documents.append(row["content"].strip())
 
-# Load embed model unless using keyword retrieval
-if not USE_KEYWORD_RETRIEVAL:
-    print("Loading embedding model (sentence-transformers). This may take a bit...")
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-    # returns numpy array
-    doc_embeddings = embed_model.encode(documents, convert_to_numpy=True)
-else:
-    embed_model = None
-    doc_embeddings = None
-    print("Using lightweight keyword retrieval (USE_KEYWORD_RETRIEVAL=1)")
+print(f"✅ Loaded {len(documents)} documents from knowledge_base.csv")
 
-def retrieve_docs(query, top_k=2):
-    """Return top_k most relevant documents."""
+# --- Embeddings ---
+embed_model = None
+doc_embeddings = None
+
+def load_embeddings():
+    """Preload embedding model + compute doc embeddings in background"""
+    global embed_model, doc_embeddings
+    try:
+        if not USE_KEYWORD_RETRIEVAL:
+            print("⚡ Preloading embedding model...")
+            from sentence_transformers import SentenceTransformer
+            from sklearn.metrics.pairwise import cosine_similarity
+            embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+            doc_embeddings = embed_model.encode(documents, convert_to_numpy=True)
+            print("✅ Embeddings ready")
+        else:
+            print("ℹ️ Using keyword retrieval (no embeddings)")
+    except Exception as e:
+        print("❌ Failed to load embeddings:", e)
+        USE_KEYWORD_RETRIEVAL = True
+
+# Start background preload
+threading.Thread(target=load_embeddings, daemon=True).start()
+
+# --- Retrieval ---
+def retrieve_docs(query, top_k=5):
+    global embed_model, doc_embeddings
+
     if USE_KEYWORD_RETRIEVAL:
-        # simple keyword overlap scoring (fast, no downloads)
         q_words = set(query.lower().split())
         scores = []
         for d in documents:
@@ -61,34 +76,47 @@ def retrieve_docs(query, top_k=2):
         idx = np.argsort(scores)[::-1][:top_k]
         return [documents[i] for i in idx if scores[i] > 0] or [documents[0]]
     else:
+        if embed_model is None or doc_embeddings is None:
+            load_embeddings()  # lazy fallback
+        from sklearn.metrics.pairwise import cosine_similarity
         q_emb = embed_model.encode([query], convert_to_numpy=True)
         sims = cosine_similarity(q_emb, doc_embeddings)[0]
         idx = sims.argsort()[::-1][:top_k]
         return [documents[i] for i in idx]
 
+# --- Cloud Storage Logging ---
+storage_client = storage.Client()
+
+def log_chat(user_message, response):
+    ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
+    filename = f"logs/chat-{ts}.txt"
+
+    bucket = storage_client.bucket(LOG_BUCKET)
+    blob = bucket.blob(filename)
+
+    log_text = f"Q: {user_message}\nA: {response}\n"
+    blob.upload_from_string(log_text, content_type="text/plain")
+
+    print(f"✅ Logged chat to {filename}")
+
+# --- Routes ---
 @app.route("/")
 def index():
     return "✅ Service is running"
 
 @app.route("/test-gemini", methods=["GET"])
 def test_gemini():
-    """Quick endpoint to confirm Gemini is reachable and returns text."""
     try:
         resp = client.models.generate_content(
             model=MODEL,
             contents="Hello! Please reply with a one-line confirmation and include the model name."
         )
-        # prefer .text if available, else try the structured path
         text = getattr(resp, "text", None)
         if not text:
-            try:
-                text = resp.candidates[0].content.parts[0].text
-            except Exception:
-                text = str(resp)
+            text = resp.candidates[0].content.parts[0].text
         return jsonify({"ok": True, "model": MODEL, "response": text})
     except Exception as e:
         traceback_str = traceback.format_exc()
-        print("Error calling Gemini:\n", traceback_str)
         return jsonify({"ok": False, "error": str(e), "trace": traceback_str}), 500
 
 @app.route("/chat", methods=["POST"])
@@ -99,32 +127,27 @@ def chat():
         if not user_message:
             return jsonify({"error": "no message provided"}), 400
 
-        docs = retrieve_docs(user_message, top_k=3)
+        docs = retrieve_docs(user_message, top_k=5)
         context = "\n\n".join(docs)
         prompt = (
             "You are a helpful assistant. Use the following documents to answer the question.\n\n"
             f"Documents:\n{context}\n\nQuestion: {user_message}\nAnswer:"
         )
 
-        resp = client.models.generate_content(
-            model=MODEL,
-            contents=prompt
-        )
-
+        resp = client.models.generate_content(model=MODEL, contents=prompt)
         text = getattr(resp, "text", None)
         if not text:
-            try:
-                text = resp.candidates[0].content.parts[0].text
-            except Exception:
-                text = str(resp)
+            text = resp.candidates[0].content.parts[0].text
+
+        # Log to Cloud Storage
+        log_chat(user_message, text)
 
         return jsonify({"response": text})
     except Exception as e:
         traceback_str = traceback.format_exc()
-        print("Error in /chat handler:\n", traceback_str)
         return jsonify({"error": str(e), "trace": traceback_str}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"Starting app on 0.0.0.0:{port}, GEMINI_MODEL={MODEL}, USE_KEYWORD_RETRIEVAL={USE_KEYWORD_RETRIEVAL}")
+    print(f"🚀 Starting app on 0.0.0.0:{port}, GEMINI_MODEL={MODEL}, USE_KEYWORD_RETRIEVAL={USE_KEYWORD_RETRIEVAL}")
     app.run(host="0.0.0.0", port=port)
