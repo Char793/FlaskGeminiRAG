@@ -1,7 +1,6 @@
 flask
-requests
-google-genai        # Google's Gen AI SDK (recommended)
 flask-cors
+google-genai
 sentence-transformers
 scikit-learn
 numpy
