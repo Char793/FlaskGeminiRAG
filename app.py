@@ -1,65 +1,42 @@
+import os
 from flask import Flask, request, jsonify
-import requests
-import numpy as np
+from google import genai   # pip package google-genai
+from flask_cors import CORS
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 app = Flask(__name__)
+CORS(app)  # allow cross-origin requests from GitHub Pages (restrict in prod)
 
-# --- 1. Load embedding model and knowledge base ---
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# read secret from env
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-1.3B")  # change as needed
 
-# Example knowledge base
-documents = [
-    "Product X warranty lasts 2 years.",
-    "Product Y has free shipping within Japan.",
-    "Support is available 24/7 via email."
-]
+# setup genai client (it reads GEMINI_API_KEY from env automatically)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Precompute embeddings for the knowledge base
-doc_embeddings = model.encode(documents)
+# simple static KB (replace with vector DB in prod)
+documents = ["Product X warranty lasts 2 years.", ...]
+embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+doc_embeddings = embed_model.encode(documents)
 
-# --- 2. Gemini API setup ---
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta2/models/gemini-1.3B:generateMessage"
-GEMINI_API_KEY = "AI"
+def retrieve_docs(query, top_k=1):
+    q_emb = embed_model.encode([query])
+    sims = cosine_similarity(q_emb, doc_embeddings)[0]
+    idx = sims.argsort()[::-1][:top_k]
+    return [documents[i] for i in idx]
 
-def generate_gemini_response(user_question, retrieved_docs):
-    # Construct prompt with retrieved docs
-    prompt = f"Use the following documents to answer the question.\n\nDocuments:\n{retrieved_docs}\n\nQuestion: {user_question}\nAnswer:"
-    
-    headers = {
-        "Authorization": f"Bearer {GEMINI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "prompt": [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.2,
-        "max_output_tokens": 300
-    }
-    
-    response = requests.post(GEMINI_API_URL, headers=headers, json=payload)
-    if response.status_code == 200:
-        return response.json()['output_text']
-    else:
-        return f"Error: {response.text}"
-
-# --- 3. Route to handle chat ---
 @app.route("/chat", methods=["POST"])
 def chat():
-    user_input = request.json.get("message", "")
-    
-    # --- Retrieve relevant document ---
-    user_embedding = model.encode([user_input])
-    similarities = cosine_similarity(user_embedding, doc_embeddings)
-    top_idx = np.argmax(similarities)
-    retrieved_doc = documents[top_idx]
-    
-    # --- Generate response ---
-    answer = generate_gemini_response(user_input, retrieved_doc)
-    return jsonify({"response": answer})
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    user_message = request.json.get("message", "")
+    docs = retrieve_docs(user_message, top_k=3)
+    prompt = "Use these documents to answer:\n\n" + "\n\n".join(docs) + f"\n\nQuestion: {user_message}"
+    resp = client.responses.generate(
+        model=MODEL,
+        input=prompt,
+        temperature=0.2,
+        max_output_tokens=400
+    )
+    text = resp.output[0].content[0].text if resp.output else "No answer"
+    return jsonify({"response": text})
