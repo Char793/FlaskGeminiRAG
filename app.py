@@ -3,6 +3,7 @@ import csv
 import traceback
 import threading
 import numpy as np
+import pandas as pd
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -28,11 +29,12 @@ client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_versi
 
 # --- Load Knowledge Base (CSV) ---
 documents = []
-with open("knowledge_base.csv", "r", encoding="utf-8") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        if row["content"].strip():
-            documents.append(row["content"].strip())
+df = pd.read_csv("knowledge_base.csv")
+
+for _, row in df.iterrows():
+    # Combine all columns into a single string for this row
+    row_text = " | ".join([f"{col}: {row[col]}" for col in df.columns if pd.notna(row[col])])
+    documents.append(row_text)
 
 print(f"✅ Loaded {len(documents)} documents from knowledge_base.csv")
 
