@@ -5,3 +5,4 @@ google-cloud-storage
 sentence-transformers
 scikit-learn
 numpy
+pandas
