@@ -1,10 +1,7 @@
 import os
-import csv
 import traceback
-import threading
 import numpy as np
 import pandas as pd
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google import genai
@@ -12,89 +9,47 @@ from google.genai.types import HttpOptions
 
 # --- Flask App ---
 app = Flask(__name__)
-CORS(app, origins="*") # in production, restrict to your frontend domain
-
+CORS(app, origins="*")  # restrict in production
 
 # --- Env Vars ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY environment variable not set.")
 
-# Model selection (update to the working one you found)
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-USE_KEYWORD_RETRIEVAL = os.environ.get("USE_KEYWORD_RETRIEVAL", "0") == "1"
 
-# --- Gemini Client --- (force v1 API)
+# --- Gemini Client ---
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
 
 # --- Load Knowledge Base (CSV) ---
 documents = []
 df = pd.read_csv("knowledge_base.csv")
-
 for _, row in df.iterrows():
-    # Combine all columns into a single string for this row
     row_text = " | ".join([f"{col}: {row[col]}" for col in df.columns if pd.notna(row[col])])
     documents.append(row_text)
 
 print(f"✅ Loaded {len(documents)} documents from knowledge_base.csv")
 
-# Small example knowledge base (replace/expand in production)
-#documents = [
-#    "Product X warranty lasts 2 years.",
-#    "Product Y is waterproof and can be used outdoors.",
-#    "Support is available 24/7 via email support@example.com",
-#]
+# --- Load precomputed embeddings ---
+EMBED_FILE = "knowledge_base_embedded.npy"
+if not os.path.exists(EMBED_FILE):
+    raise RuntimeError(f"{EMBED_FILE} not found. You must precompute embeddings locally first.")
 
-# Load knowledge base from file
-#with open("knowledge_base.txt", "r", encoding="utf-8") as f:
-#    documents = [line.strip() for line in f if line.strip()]
-
-# --- Embeddings ---
-embed_model = None
-doc_embeddings = None
-
-def load_embeddings():
-    """Preload embedding model + compute doc embeddings in background"""
-    global embed_model, doc_embeddings, USE_KEYWORD_RETRIEVAL
-    try:
-        if not USE_KEYWORD_RETRIEVAL:
-            print("⚡ Preloading embedding model...")
-            from sentence_transformers import SentenceTransformer
-            from sklearn.metrics.pairwise import cosine_similarity
-            embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-            doc_embeddings = embed_model.encode(documents, convert_to_numpy=True)
-            print("✅ Embeddings ready")
-        else:
-            print("ℹ️ Using keyword retrieval (no embeddings)")
-    except Exception as e:
-        print("❌ Failed to load embeddings:", e)
-        USE_KEYWORD_RETRIEVAL = True
-
-# Start background preload
-threading.Thread(target=load_embeddings, daemon=True).start()
+doc_embeddings = np.load(EMBED_FILE)
+print(f"✅ Loaded embeddings from {EMBED_FILE}")
 
 # --- Retrieval ---
 def retrieve_docs(query, top_k=5):
-    """Return top_k most relevant documents."""
-    global embed_model, doc_embeddings
-    
-    if USE_KEYWORD_RETRIEVAL:
-        # simple keyword overlap scoring (fast, no downloads)
-        q_words = set(query.lower().split())
-        scores = []
-        for d in documents:
-            d_words = set(d.lower().split())
-            scores.append(len(q_words & d_words))
-        idx = np.argsort(scores)[::-1][:top_k]
-        return [documents[i] for i in idx if scores[i] > 0] or [documents[0]]
-    else:
-        if embed_model is None or doc_embeddings is None:
-            load_embeddings() # lazy fallback
-        from sklearn.metrics.pairwise import cosine_similarity
-        q_emb = embed_model.encode([query], convert_to_numpy=True)
-        sims = cosine_similarity(q_emb, doc_embeddings)[0]
-        idx = sims.argsort()[::-1][:top_k]
-        return [documents[i] for i in idx]
+    """Retrieve top_k most similar documents using precomputed embeddings."""
+    # Embed query on-the-fly
+    resp = client.models.embed_content(
+        model="text-embedding-004",
+        contents=[query]
+    )
+    q_emb = np.array(resp.embeddings[0].values)
+    sims = np.dot(doc_embeddings, q_emb) / (np.linalg.norm(doc_embeddings, axis=1) * np.linalg.norm(q_emb) + 1e-8)
+    idx = sims.argsort()[::-1][:top_k]
+    return [documents[i] for i in idx]
 
 # --- Routes ---
 @app.route("/")
@@ -103,19 +58,12 @@ def index():
 
 @app.route("/test-gemini", methods=["GET"])
 def test_gemini():
-    """Quick endpoint to confirm Gemini is reachable and returns text."""
     try:
         resp = client.models.generate_content(
             model=MODEL,
-            contents="Hello! Please reply with a one-line confirmation and include the model name."
+            contents="Hello! Please reply with a one-line confirmation."
         )
-        # prefer .text if available, else try the structured path
         text = getattr(resp, "text", None)
-        if not text:
-            try:
-                text = resp.candidates[0].content.parts[0].text
-            except Exception:
-                text = str(resp)
         return jsonify({"ok": True, "model": MODEL, "response": text})
     except Exception as e:
         traceback_str = traceback.format_exc()
@@ -133,18 +81,12 @@ def chat():
         docs = retrieve_docs(user_message, top_k=5)
         context = "\n\n".join(docs)
         prompt = (
-            "You are a helpful assistant. You also provide suggestion. Use the following documents to answer the question.\n\n"
+            "You are a helpful assistant. Use the following documents to answer the question.\n\n"
             f"Documents:\n{context}\n\nQuestion: {user_message}\nAnswer:"
         )
 
         resp = client.models.generate_content(model=MODEL, contents=prompt)
         text = getattr(resp, "text", None)
-        if not text:
-            try:
-                text = resp.candidates[0].content.parts[0].text
-            except Exception:
-                text = str(resp)
-
         return jsonify({"response": text})
     except Exception as e:
         traceback_str = traceback.format_exc()
@@ -153,5 +95,6 @@ def chat():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"Starting app on 0.0.0.0:{port}, GEMINI_MODEL={MODEL}, USE_KEYWORD_RETRIEVAL={USE_KEYWORD_RETRIEVAL}")
+    print(f"Starting app on 0.0.0.0:{port}, GEMINI_MODEL={MODEL}")
     app.run(host="0.0.0.0", port=port)
+
