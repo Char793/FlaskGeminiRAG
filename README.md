@@ -1,4 +1,4 @@
-# 🍣 Restaurant Recommender Chatbot (Tokyo)
+# 🤖 Restaurant Recommender Chatbot (Tokyo) 🍣
 
 This project provides a backend API for a **restaurant recommendation chatbot** specialized in the **Tabelog Tokyo 1000 Restaurants dataset**.
 
