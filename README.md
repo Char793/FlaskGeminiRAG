@@ -21,15 +21,15 @@ Before starting, ensure you have the following:
 
 ```
 .
-├── app.py
+├── app.py                          # Modify RAG prompt and variable (context_columns) to fit your purpose 
 ├── requirements.txt
-├── knowledge_base.csv              # 🚨 REPLACE THIS with the full Kaggle data
-├── knowledge_base_embedded.npy     # Generated file (do not commit)
+├── knowledge_base.csv              # Replace this with the data you want to use
+├── knowledge_base_embedded.npy     # Generated file (automatically made from knowledge_base.csv)
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
 │   └── script.js
-│── example_image/example.png       # example image of the interface
+│── example_image/example.png       # Example image of chatbot interface
 └── README.md
 ```
 
