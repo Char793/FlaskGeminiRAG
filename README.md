@@ -60,19 +60,19 @@ gcloud services enable run.googleapis.com secretmanager.googleapis.com
 
 ### 🔑 Gemini API Key Setup (Secret Manager)
 
-Your `app.py` requires the `GEMINI_API_KEY` environment variable. We will secure this key using **Google Cloud Secret Manager**.
+Your `app.py` requires the `gemini-api-key` environment variable. We will secure this key using **Google Cloud Secret Manager**.
 
-#### 3. Add GEMINI_API_KEY to Secrets
+#### 3. Add gemini-api-key to Secrets
 
 ```bash
 # Replace 'YOUR_GEMINI_API_KEY' with your actual key
-echo "YOUR_GEMINI_API_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=-
+echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets create gemini-api-key --data-file=-
 ```
 
 If the secret already exists:
 
 ```bash
-echo "YOUR_GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+echo "YOUR_GEMINI_API_KEY" | gcloud secrets versions add gemini-api-key --data-file=-
 ```
 
 #### 4. Grant Service Account Access
@@ -88,9 +88,11 @@ echo $SERVICE_ACCOUNT_EMAIL # Verify the email
 Then give the account access:
 
 ```bash
-gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+gcloud secrets add-iam-policy-binding gemini-api-key \
   --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
   --role="roles/secretmanager.secretAccessor"
+
+  # example: member="serviceAccount:000000000000-compute@developer.gserviceaccount.com"
 ```
 
 ---
@@ -108,7 +110,7 @@ pip install -r requirements.txt
 Pre-calculate embeddings:
 
 ```bash
-export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+export gemini-api-key="YOUR_GEMINI_API_KEY"
 python app.py
 # Press Ctrl+C after seeing "✅ Embeddings saved..."
 ```
@@ -116,7 +118,7 @@ python app.py
 Run Flask locally:
 
 ```bash
-export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+export gemini-api-key="YOUR_GEMINI_API_KEY"
 python app.py
 ```
 
@@ -140,11 +142,7 @@ gcloud run deploy restaurant-chatbot-backend \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars=GEMINI_API_KEY=projects/YOUR_PROJECT_ID/secrets/GEMINI_API_KEY/versions/latest \
-  --memory 1Gi \
-  --cpu 1 \
-  --port 8080 \
-  --quiet
+  --set-secrets gemini-api-key=gemini-api-key:latest \
 ```
 
 Note the **Service URL** upon success (your `BACKEND_URL`).
@@ -173,7 +171,7 @@ Expected: JSON response with recommendation + session_id.
 
 #### 8. Update Frontend
 
-Edit `frontend/script.js` and replace the placeholder `API_ENDPOINT` with your `BACKEND_URL`.
+Edit `frontend/script.js` and replace the placeholder `YOUR_CLOUD_RUN_SERVICE_URL` with your `BACKEND_URL`.
 
 Run frontend locally:
 
