@@ -9,7 +9,7 @@ This project provides a backend API for a **restaurant recommendation chatbot** 
 
 ![Robot Head](./example_image/example.png)
 <p align="center">
-  <img src="./example_image/example.png" alt="Interface Example" maxwidth="600"/>
+  <img src="./example_image/example.png" alt="Interface Example" max-width="500"/>
 </p>
 
 ---
