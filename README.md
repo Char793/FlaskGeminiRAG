@@ -7,7 +7,6 @@ This project provides a backend API for a **restaurant recommendation chatbot** 
 * **RAG**: Implements Retrieval-Augmented Generation (RAG) using pre-computed embeddings from `knowledge_base.csv`
 * **Deployment**: Designed to run on **Google Cloud Run**
 
-![Robot Head](./example_image/example.png)
 <p align="center">
   <img src="./example_image/example.png" alt="Interface Example" width="500"/>
 </p>
