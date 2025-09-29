@@ -6,7 +6,7 @@ This project provides a backend API for a **restaurant recommendation chatbot** 
 * **AI**: Uses the Google **Gemini API** for chat generation and query classification
 * **RAG**: Implements Retrieval-Augmented Generation (RAG) using pre-computed embeddings from `knowledge_base.csv`
 * **Deployment**: Designed to run on **Google Cloud Run**
-![Robot Head](./example.image/example.png)
+![Robot Head](./example_image/example.png)
 
 ---
 
