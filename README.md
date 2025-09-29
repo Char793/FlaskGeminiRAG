@@ -8,6 +8,9 @@ This project provides a backend API for a **restaurant recommendation chatbot** 
 * **Deployment**: Designed to run on **Google Cloud Run**
 
 ![Robot Head](./example_image/example.png)
+<p align="center">
+  <img src="./example_image/example.png" alt="Interface Example" width="120"/>
+</p>
 
 ---
 
