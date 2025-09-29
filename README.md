@@ -29,6 +29,7 @@ Before starting, ensure you have the following:
 │   ├── index.html
 │   ├── style.css
 │   └── script.js
+│── example_image/example.png       # example image of the interface
 └── README.md
 ```
 
