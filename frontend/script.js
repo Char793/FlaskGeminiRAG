@@ -55,7 +55,7 @@ async function sendMessage() {
     
     const data = await res.json();
     
-    // 💡 Crucial update: Store the session_id returned by the server
+    // 💡 Store the session_id returned by the server
     // This handles both the initial creation and subsequent updates
     if (data.session_id) {
         currentSessionId = data.session_id;
