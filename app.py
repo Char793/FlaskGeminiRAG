@@ -22,13 +22,11 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 # --- Gemini Client ---
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
 
-# --- 💡 ステートフル対応: インメモリセッションストア ---
-# 実際のアプリケーションでは、Redisやデータベースを使用してください
+# --- ステートフル対応: インメモリセッションストア ---
 chat_sessions = {}
 
 # --- Load Knowledge Base (CSV) ---
 documents = []
-# 💡 修正点: 'Addresses'をRAGコンテキストに必ず含める
 context_columns = ["Restaurant name", "Categories", "Addresses", "Transportation", "Budget"]
 
 df = pd.read_csv("knowledge_base.csv")
@@ -41,7 +39,7 @@ for _, row in df.iterrows():
 
 print(f"✅ Loaded {len(documents)} documents from knowledge_base.csv")
 
-# --- Embeddings (変更なし) ---
+# --- Embeddings ---
 EMBED_FILE = "knowledge_base_embedded.npy"
 doc_embeddings = None
 
@@ -70,7 +68,7 @@ def load_or_create_embeddings():
 
 load_or_create_embeddings()
 
-# --- Retrieval (変更なし) ---
+# --- Retrieval ---
 def retrieve_docs(query, top_k=5):
     global doc_embeddings
     if doc_embeddings is None:
@@ -82,7 +80,7 @@ def retrieve_docs(query, top_k=5):
     idx = sims.argsort()[::-1][:top_k]
     return [documents[i] for i in idx]
 
-# --- Query Classifier (from previous step) ---
+# --- Query Classifier ---
 def classify_query(client, query):
     """
     Uses the Gemini API to classify the user's query as relevant or irrelevant.
@@ -104,8 +102,7 @@ def classify_query(client, query):
     
     return resp.text.strip().upper()
 
-# app.py (New function to classify irrelevant queries further)
-
+# (function to classify irrelevant queries further)
 def is_greeting_only(client, query):
     """
     Classifies an irrelevant query as a simple greeting or a non-restaurant question.
@@ -160,7 +157,7 @@ def chat():
         if not user_message:
             return jsonify({"error": "no message provided"}), 400
 
-        # 1. セッションの取得または作成
+        # 1. Create or read user session
         if session_id and session_id in chat_sessions:
             chat = chat_sessions[session_id]
         else:
@@ -180,7 +177,7 @@ def chat():
             chat_sessions[session_id] = chat
             print(f"🆕 New session created: {session_id}")
 
-        # 2. クエリの分類
+        # 2. Classify query
         relevance_status = classify_query(client, user_message)
         response_text = ""
         
@@ -213,7 +210,7 @@ def chat():
             docs = retrieve_docs(user_message, top_k=5)
             context = "\n\n".join(docs)
             
-            # 💡 UPDATE 3: Modified RAG prompt to show all information
+            # Modified RAG prompt to show information in a specific way
             rag_prompt_for_chat = (
                 f"Use ONLY the following documents to answer the question, but remember the conversation history. The documents are:\n{context}\n\n"
                 "**INSTRUCTIONS:** "
